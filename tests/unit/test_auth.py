@@ -113,6 +113,14 @@ class TestResolveToken:
         with patch("mem0_mcp_selfhosted.auth._CREDENTIALS_PATH", Path("/nonexistent")):
             assert resolve_token() == "sk-ant-api03-real"
 
+    def test_all_whitespace_sources_returns_none(self, monkeypatch):
+        """All auth sources whitespace-only results in None."""
+        monkeypatch.setenv("MEM0_ANTHROPIC_TOKEN", "  ")
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "  \n")
+
+        with patch("mem0_mcp_selfhosted.auth._CREDENTIALS_PATH", Path("/nonexistent")):
+            assert resolve_token() is None
+
 
 # --- Tests for read_credentials_full() ---
 

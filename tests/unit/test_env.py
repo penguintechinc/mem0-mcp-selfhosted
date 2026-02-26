@@ -35,6 +35,11 @@ class TestEnv:
         with patch.dict(os.environ, {"TEST_KEY": "  \n"}):
             assert env("TEST_KEY") == ""
 
+    def test_empty_value_ignores_default(self):
+        """Explicitly set empty value returns empty, not the default."""
+        with patch.dict(os.environ, {"TEST_KEY": ""}):
+            assert env("TEST_KEY", "fallback") == ""
+
 
 class TestOptEnv:
     """Tests for opt_env() — optional env vars (None when absent)."""
@@ -90,3 +95,7 @@ class TestBoolEnv:
     def test_strips_whitespace(self):
         with patch.dict(os.environ, {"TEST_KEY": " true \n"}):
             assert bool_env("TEST_KEY") is True
+
+    def test_whitespace_only_is_false(self):
+        with patch.dict(os.environ, {"TEST_KEY": "  \n"}):
+            assert bool_env("TEST_KEY") is False
