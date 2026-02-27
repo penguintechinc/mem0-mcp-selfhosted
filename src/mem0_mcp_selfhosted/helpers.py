@@ -200,11 +200,15 @@ def call_with_graph(
         return func(*args, **kwargs)
 
 
-def safe_bulk_delete(memory: Any, filters: dict[str, Any]) -> int:
+def safe_bulk_delete(memory: Any, filters: dict[str, Any], *, graph_enabled: bool = False) -> int:
     """Safely delete all memories matching filters.
 
     NEVER calls memory.delete_all() (which triggers vector_store.reset()).
     Instead: iterate + individual delete + mandatory graph cleanup.
+
+    Args:
+        graph_enabled: Explicit graph state from caller (avoids reading
+            mutable ``memory.enable_graph`` which races with ``call_with_graph``).
 
     Returns the count of deleted memories.
     """
@@ -224,7 +228,7 @@ def safe_bulk_delete(memory: Any, filters: dict[str, Any]) -> int:
             logger.warning("Failed to delete memory %s: %s", memory_id, exc)
 
     # Mandatory graph cleanup — memory.delete() does NOT clean Neo4j (GitHub #3245)
-    if memory.enable_graph and hasattr(memory, "graph") and memory.graph is not None:
+    if graph_enabled and hasattr(memory, "graph") and memory.graph is not None:
         try:
             memory.graph.delete_all(filters)
         except Exception as exc:

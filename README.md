@@ -26,13 +26,11 @@ Add the MCP server globally (available across all projects):
 
 ```bash
 claude mcp add --scope user --transport stdio mem0 \
-  --env MEM0_QDRANT_URL=http://localhost:6333 \
-  --env MEM0_EMBED_URL=http://localhost:11434 \
-  --env MEM0_EMBED_MODEL=bge-m3 \
-  --env MEM0_EMBED_DIMS=1024 \
   --env MEM0_USER_ID=your-user-id \
   -- uvx --from git+https://github.com/elvismdev/mem0-mcp-selfhosted.git mem0-mcp-selfhosted
 ```
+
+All defaults work out of the box: Qdrant on `localhost:6333`, Ollama embeddings on `localhost:11434` with `bge-m3` (1024 dims). Override any default via `--env` (see [Configuration](#configuration)).
 
 `uvx` automatically downloads, installs, and runs the server in an isolated environment — no manual installation needed. Claude Code launches it on demand when the MCP connection starts.
 
@@ -44,16 +42,13 @@ For a fully local setup with no cloud dependencies, use Ollama for both the main
 
 ```bash
 claude mcp add --scope user --transport stdio mem0 \
-  --env MEM0_LLM_PROVIDER=ollama \
+  --env MEM0_PROVIDER=ollama \
   --env MEM0_LLM_MODEL=qwen3:14b \
-  --env MEM0_LLM_URL=http://localhost:11434 \
-  --env MEM0_QDRANT_URL=http://localhost:6333 \
-  --env MEM0_EMBED_URL=http://localhost:11434 \
-  --env MEM0_EMBED_MODEL=bge-m3 \
-  --env MEM0_EMBED_DIMS=1024 \
   --env MEM0_USER_ID=your-user-id \
   -- uvx --from git+https://github.com/elvismdev/mem0-mcp-selfhosted.git mem0-mcp-selfhosted
 ```
+
+`MEM0_PROVIDER=ollama` cascades to both the main LLM and graph LLM providers (but not embeddings). Same infrastructure defaults apply (Qdrant on `localhost:6333`, `bge-m3` embeddings). Per-service overrides (e.g. `MEM0_LLM_URL`, `MEM0_EMBED_URL`) still work when needed.
 
 Or add it to a single project by creating `.mcp.json` in the project root:
 
@@ -64,13 +59,8 @@ Or add it to a single project by creating `.mcp.json` in the project root:
       "command": "uvx",
       "args": ["--from", "git+https://github.com/elvismdev/mem0-mcp-selfhosted.git", "mem0-mcp-selfhosted"],
       "env": {
-        "MEM0_LLM_PROVIDER": "ollama",
+        "MEM0_PROVIDER": "ollama",
         "MEM0_LLM_MODEL": "qwen3:14b",
-        "MEM0_LLM_URL": "http://localhost:11434",
-        "MEM0_QDRANT_URL": "http://localhost:6333",
-        "MEM0_EMBED_URL": "http://localhost:11434",
-        "MEM0_EMBED_MODEL": "bge-m3",
-        "MEM0_EMBED_DIMS": "1024",
         "MEM0_USER_ID": "your-user-id"
       }
     }
@@ -111,7 +101,7 @@ The server resolves an Anthropic token using a prioritized fallback chain:
 | 3 | `ANTHROPIC_API_KEY` env var | Standard pay-per-use API key |
 | 4 | Disabled | Warns and disables Anthropic LLM features |
 
-**OAT tokens** (`sk-ant-oat...`) use your Claude subscription. The server automatically detects the token type and configures the SDK accordingly.
+**OAT tokens** (`sk-ant-oat...`) use your Claude subscription. The server automatically detects the token type and configures the SDK accordingly. OAT tokens are automatically refreshed before expiry: the server proactively checks the token lifetime and refreshes via the Anthropic OAuth endpoint when nearing expiry (default: 30 minutes). On authentication failures, a 3-step defensive strategy kicks in — piggybacking on Claude Code's credentials file, self-refreshing via OAuth, and wait-and-retry — so long-running sessions survive token rotation seamlessly.
 
 **API keys** (`sk-ant-api...`) use standard pay-per-use billing.
 
@@ -162,21 +152,24 @@ All configuration is via environment variables. Create a `.env` file or set them
 | `MEM0_ANTHROPIC_TOKEN` | -- | Anthropic OAT or API token (priority 1) |
 | `ANTHROPIC_API_KEY` | -- | Standard Anthropic API key (priority 3) |
 | `MEM0_OAT_HEADERS` | `auto` | OAT identity headers: `auto` or `none` |
+| `MEM0_OAT_REFRESH_THRESHOLD_SECONDS` | `1800` | Seconds before expiry to trigger proactive OAT token refresh |
 
 ### LLM
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `MEM0_LLM_PROVIDER` | `anthropic` | Main LLM provider: `anthropic` or `ollama` |
+| `MEM0_PROVIDER` | `anthropic` | Top-level provider (`anthropic` or `ollama`). Cascades to `MEM0_LLM_PROVIDER` and `MEM0_GRAPH_LLM_PROVIDER` when those are not set. Does **not** affect `MEM0_EMBED_PROVIDER`. |
+| `MEM0_LLM_PROVIDER` | _(MEM0_PROVIDER)_ | Main LLM provider: `anthropic` or `ollama`. Inherits from `MEM0_PROVIDER` when not set. |
+| `MEM0_OLLAMA_URL` | `http://localhost:11434` | Shared Ollama base URL. Cascades to `MEM0_LLM_URL`, `MEM0_EMBED_URL`, and `MEM0_GRAPH_LLM_URL` when those are not set. |
 | `MEM0_LLM_MODEL` | _(per-provider)_ | Model for the selected LLM provider. Defaults to `claude-opus-4-6` for Anthropic, `qwen3:14b` for Ollama |
-| `MEM0_LLM_URL` | `http://localhost:11434` | Ollama base URL for the main LLM. Only used when `MEM0_LLM_PROVIDER=ollama` |
+| `MEM0_LLM_URL` | _(cascades)_ | Ollama base URL for the main LLM. Cascades: `MEM0_LLM_URL` → `MEM0_OLLAMA_URL` → `http://localhost:11434`. Only used when `MEM0_LLM_PROVIDER=ollama` |
 | `MEM0_LLM_MAX_TOKENS` | `16384` | Max tokens for LLM responses (Anthropic only) |
-| `MEM0_GRAPH_LLM_PROVIDER` | `anthropic` | Graph LLM provider (`anthropic`, `anthropic_oat`, `ollama`, `gemini`, `gemini_split`) |
-| `MEM0_GRAPH_LLM_URL` | _(cascades)_ | Ollama base URL for graph LLM. Cascades: `MEM0_GRAPH_LLM_URL` → `MEM0_LLM_URL` → `http://localhost:11434` |
+| `MEM0_GRAPH_LLM_PROVIDER` | _(MEM0_PROVIDER)_ | Graph LLM provider (`anthropic`, `anthropic_oat`, `ollama`, `gemini`, `gemini_split`). Inherits from `MEM0_PROVIDER` when not set. |
+| `MEM0_GRAPH_LLM_URL` | _(cascades)_ | Ollama base URL for graph LLM. Cascades: `MEM0_GRAPH_LLM_URL` → `MEM0_LLM_URL` → `MEM0_OLLAMA_URL` → `http://localhost:11434` |
 | `MEM0_GRAPH_LLM_MODEL` | _(varies)_ | Graph model. Inherits `MEM0_LLM_MODEL` for anthropic/ollama; defaults to `gemini-2.5-flash-lite` for gemini/gemini_split |
 | `GOOGLE_API_KEY` | -- | Google API key (required for `gemini`/`gemini_split` graph providers) |
 | `MEM0_GRAPH_CONTRADICTION_LLM_PROVIDER` | `anthropic` | Contradiction LLM provider in `gemini_split` mode (`anthropic`, `anthropic_oat`, `ollama`) |
-| `MEM0_GRAPH_CONTRADICTION_LLM_MODEL` | _(inherits MEM0_LLM_MODEL)_ | Contradiction model in `gemini_split` mode |
+| `MEM0_GRAPH_CONTRADICTION_LLM_MODEL` | _(provider-aware)_ | Contradiction model in `gemini_split` mode. Defaults to `claude-opus-4-6` for `anthropic`/`anthropic_oat` providers; inherits `MEM0_LLM_MODEL` for others. |
 | `MEM0_OLLAMA_KEEP_ALIVE` | `30m` | How long Ollama keeps the model in VRAM between calls (e.g., `1h`, `5m`). Prevents model unload during multi-call graph pipelines |
 | `MEM0_OLLAMA_THINK` | `false` | Set to `true` to re-enable qwen3 thinking mode (disabled by default to prevent `<think>` + `format:"json"` collision) |
 
@@ -186,7 +179,7 @@ All configuration is via environment variables. Create a `.env` file or set them
 |----------|---------|-------------|
 | `MEM0_EMBED_PROVIDER` | `ollama` | Embedding provider (`ollama` or `openai`) |
 | `MEM0_EMBED_MODEL` | `bge-m3` | Embedding model name |
-| `MEM0_EMBED_URL` | `http://localhost:11434` | Ollama URL for embeddings only. For LLM URLs, use `MEM0_LLM_URL` / `MEM0_GRAPH_LLM_URL` |
+| `MEM0_EMBED_URL` | _(cascades)_ | Ollama URL for embeddings. Cascades: `MEM0_EMBED_URL` → `MEM0_OLLAMA_URL` → `http://localhost:11434` |
 | `MEM0_EMBED_DIMS` | `1024` | Embedding vector dimensions |
 
 ### Vector Store (Qdrant)
@@ -229,13 +222,15 @@ Claude Code
   |
   └── MCP stdio/SSE/streamable-http
         |
-        ├── auth.py              ← Hybrid token fallback chain
+        ├── env.py               ← Centralized env var readers (whitespace-safe)
+        ├── auth.py              ← Hybrid token fallback chain + OAT self-refresh
         ├── llm_anthropic.py     ← Custom Anthropic LLM provider (OAT + structured outputs)
         ├── llm_ollama.py        ← Custom Ollama LLM provider (restored tool-calling)
-        ├── config.py            ← Env vars → MemoryConfig dict
-        ├── helpers.py           ← Error wrapper, concurrency lock, safe bulk-delete
+        ├── config.py            ← Env vars → MemoryConfig dict (provider + URL cascades)
+        ├── helpers.py           ← Error wrapper, concurrency lock, safe bulk-delete, monkey-patches
         ├── graph_tools.py       ← Direct Neo4j Cypher queries (lazy driver)
         ├── llm_router.py        ← Split-model graph LLM router (gemini_split)
+        ├── __init__.py          ← Telemetry suppression (before any mem0 import)
         └── server.py            ← FastMCP orchestrator (11 tools + prompt)
               |
               ├── mem0ai Memory class
@@ -321,7 +316,7 @@ python3 -m pytest tests/ -v
 
 ### Test Structure
 
-- **`tests/unit/`** -- Pure unit tests with mocked dependencies (auth, config, helpers, LLM provider, graph tools, LLM router)
+- **`tests/unit/`** -- Pure unit tests with mocked dependencies (env, auth, config, config matrix, concurrency, MCP protocol, helpers, LLM providers, graph tools, LLM router, server)
 - **`tests/contract/`** -- Validates assumptions about mem0ai internals (schema detection invariant, `vector_store.client` access path, `LlmFactory` registration idempotency)
 - **`tests/integration/`** -- Live infrastructure tests (memory lifecycle, graph ops, bulk operations) against real Qdrant + Neo4j + Ollama. Marked with `@pytest.mark.integration`.
 

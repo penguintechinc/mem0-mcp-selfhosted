@@ -243,7 +243,7 @@ class AnthropicOATLLM(LLMBase):
         Attempts piggyback then self-refresh (skips wait-and-retry for proactive).
         On failure, proceeds silently — the normal 401 retry flow will handle it.
         """
-        if not is_oat_token(self._current_token):
+        if not self._current_token or not is_oat_token(self._current_token):
             return
         if not is_token_expiring_soon(self._expires_at, self._refresh_threshold):
             return
@@ -457,9 +457,15 @@ class AnthropicOATLLM(LLMBase):
             # else: no output_config — rely on extractJson fallback
 
             response = self._call_api(params)
+            if not response.content:
+                logger.warning("Anthropic API returned empty content (structured output path)")
+                return ""
             text = response.content[0].text
             return extract_json(text)
 
         # Plain text response (no tools, no response_format)
         response = self._call_api(params)
+        if not response.content:
+            logger.warning("Anthropic API returned empty content (plain text path)")
+            return ""
         return response.content[0].text

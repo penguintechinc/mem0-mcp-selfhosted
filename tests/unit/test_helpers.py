@@ -128,25 +128,33 @@ class TestSafeBulkDelete:
         memory.delete.assert_any_call("id-1")
         memory.delete.assert_any_call("id-2")
 
-    def test_graph_cleanup_when_enabled(self):
+    def test_graph_cleanup_when_graph_enabled_true(self):
         memory = MagicMock()
-        memory.enable_graph = True
+        memory.graph = MagicMock()
+        memory.vector_store.list.return_value = []
+
+        safe_bulk_delete(memory, {"user_id": "testuser"}, graph_enabled=True)
+
+        memory.graph.delete_all.assert_called_once_with({"user_id": "testuser"})
+
+    def test_no_graph_cleanup_when_graph_enabled_false(self):
+        memory = MagicMock()
+        memory.graph = MagicMock()
+        memory.vector_store.list.return_value = []
+
+        safe_bulk_delete(memory, {"user_id": "testuser"}, graph_enabled=False)
+
+        memory.graph.delete_all.assert_not_called()
+
+    def test_no_graph_cleanup_default(self):
+        """Default graph_enabled=False skips graph cleanup."""
+        memory = MagicMock()
         memory.graph = MagicMock()
         memory.vector_store.list.return_value = []
 
         safe_bulk_delete(memory, {"user_id": "testuser"})
 
-        memory.graph.delete_all.assert_called_once_with({"user_id": "testuser"})
-
-    def test_no_graph_cleanup_when_disabled(self):
-        memory = MagicMock()
-        memory.enable_graph = False
-        memory.graph = None
-        memory.vector_store.list.return_value = []
-
-        safe_bulk_delete(memory, {"user_id": "testuser"})
-
-        # graph.delete_all should not be called when graph is disabled
+        memory.graph.delete_all.assert_not_called()
 
 
 class TestGetDefaultUserId:

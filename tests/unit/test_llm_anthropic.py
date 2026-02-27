@@ -660,3 +660,78 @@ class TestProactiveRefresh:
 
         mock_expiry.assert_not_called()
         assert result is success
+
+    def test_proactive_refresh_skipped_for_none_token(self):
+        """None token → proactive refresh returns immediately (no TypeError)."""
+        llm = _make_llm(API_KEY)
+        llm._current_token = None  # Simulate no token available
+        success = _make_api_response("ok")
+        llm.client.messages.create = MagicMock(return_value=success)
+
+        with patch(
+            "mem0_mcp_selfhosted.llm_anthropic.is_oat_token"
+        ) as mock_is_oat:
+            result = llm._call_api({"model": "test"})
+
+        mock_is_oat.assert_not_called()
+        assert result is success
+
+    def test_proactive_refresh_calls_is_oat_for_valid_token(self):
+        """Valid string token → is_oat_token is called normally."""
+        llm = _make_llm(OAT_TOKEN)
+        llm._expires_at = int(__import__("time").time() * 1000) + (4 * 3600 * 1000)  # 4hrs left
+        success = _make_api_response("ok")
+        llm.client.messages.create = MagicMock(return_value=success)
+
+        with patch(
+            "mem0_mcp_selfhosted.llm_anthropic.is_oat_token", return_value=True
+        ) as mock_is_oat:
+            with patch(
+                "mem0_mcp_selfhosted.llm_anthropic.is_token_expiring_soon", return_value=False
+            ):
+                llm._call_api({"model": "test"})
+
+        mock_is_oat.assert_called_once_with(OAT_TOKEN)
+
+
+class TestGenerateResponseEmptyContent:
+    """Tests for empty response.content guard in generate_response."""
+
+    def test_structured_output_empty_content_returns_empty_string(self):
+        """Structured output path returns '' when response.content is []."""
+        llm = _make_llm(API_KEY)
+        empty_response = MagicMock()
+        empty_response.content = []
+        llm.client.messages.create = MagicMock(return_value=empty_response)
+
+        result = llm.generate_response(
+            messages=[{"role": "user", "content": "test"}],
+            response_format="json",
+        )
+
+        assert result == ""
+
+    def test_plain_text_empty_content_returns_empty_string(self):
+        """Plain text path returns '' when response.content is []."""
+        llm = _make_llm(API_KEY)
+        empty_response = MagicMock()
+        empty_response.content = []
+        llm.client.messages.create = MagicMock(return_value=empty_response)
+
+        result = llm.generate_response(
+            messages=[{"role": "user", "content": "test"}],
+        )
+
+        assert result == ""
+
+    def test_normal_content_still_works(self):
+        """Non-empty content returns text normally (regression check)."""
+        llm = _make_llm(API_KEY)
+        success = _make_api_response("hello world")
+        llm.client.messages.create = MagicMock(return_value=success)
+
+        result = llm.generate_response(
+            messages=[{"role": "user", "content": "test"}],
+        )
+
+        assert result == "hello world"

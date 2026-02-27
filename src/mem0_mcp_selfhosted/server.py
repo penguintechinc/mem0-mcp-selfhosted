@@ -71,7 +71,7 @@ def _resolve_config_class(provider_name: str) -> type | None:
         from mem0.configs.llms.ollama import OllamaConfig
 
         return OllamaConfig
-    if provider_name == "anthropic":
+    if provider_name in ("anthropic", "anthropic_oat"):
         from mem0_mcp_selfhosted.llm_anthropic import AnthropicOATConfig
 
         return AnthropicOATConfig
@@ -288,7 +288,7 @@ def _register_tools(mcp: FastMCP) -> None:
             filters["run_id"] = run_id
 
         def _do_bulk_delete():
-            count = safe_bulk_delete(memory, filters)
+            count = safe_bulk_delete(memory, filters, graph_enabled=_enable_graph_default)
             return {"message": f"Deleted {count} memories.", "count": count}
 
         return _mem0_call(_do_bulk_delete)
@@ -334,7 +334,7 @@ def _register_tools(mcp: FastMCP) -> None:
             filters["run_id"] = run_id
 
         def _do_delete_entity():
-            count = safe_bulk_delete(memory, filters)
+            count = safe_bulk_delete(memory, filters, graph_enabled=_enable_graph_default)
             return {"message": f"Entity deleted. Removed {count} memories.", "count": count}
 
         return _mem0_call(_do_delete_entity)

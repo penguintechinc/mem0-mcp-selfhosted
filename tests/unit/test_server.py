@@ -175,7 +175,7 @@ class TestDeleteAllMemories:
         srv, mem = server_with_mock
         fn = _get_tool_fn(srv, "delete_all_memories")
         result = fn()
-        mock_sbd.assert_called_once_with(mem, {"user_id": "test-user"})
+        mock_sbd.assert_called_once_with(mem, {"user_id": "test-user"}, graph_enabled=False)
         parsed = json.loads(result)
         assert parsed["count"] == 0
 
@@ -184,7 +184,7 @@ class TestDeleteAllMemories:
         srv, mem = server_with_mock
         fn = _get_tool_fn(srv, "delete_all_memories")
         result = fn(user_id="alice")
-        mock_sbd.assert_called_once_with(mem, {"user_id": "alice"})
+        mock_sbd.assert_called_once_with(mem, {"user_id": "alice"}, graph_enabled=False)
         parsed = json.loads(result)
         assert parsed["count"] == 3
 
@@ -214,7 +214,7 @@ class TestDeleteEntities:
         srv, mem = server_with_mock
         fn = _get_tool_fn(srv, "delete_entities")
         result = fn(user_id="alice")
-        mock_sbd.assert_called_once_with(mem, {"user_id": "alice"})
+        mock_sbd.assert_called_once_with(mem, {"user_id": "alice"}, graph_enabled=False)
         parsed = json.loads(result)
         assert parsed["count"] == 5
 
@@ -329,7 +329,36 @@ class TestInitMemory:
         )
 
 
+class TestResolveConfigClass:
+    def test_anthropic_oat_returns_config(self):
+        """anthropic_oat resolves to AnthropicOATConfig (same as anthropic)."""
+        from mem0_mcp_selfhosted.llm_anthropic import AnthropicOATConfig
+
+        result = server_mod._resolve_config_class("anthropic_oat")
+        assert result is AnthropicOATConfig
+
+    def test_anthropic_returns_config(self):
+        """anthropic still resolves to AnthropicOATConfig."""
+        from mem0_mcp_selfhosted.llm_anthropic import AnthropicOATConfig
+
+        result = server_mod._resolve_config_class("anthropic")
+        assert result is AnthropicOATConfig
+
+    def test_unknown_returns_none(self):
+        """Unknown provider returns None."""
+        assert server_mod._resolve_config_class("unknown") is None
+
+
 class TestRegisterProviders:
+    @patch("mem0.utils.factory.LlmFactory.register_provider")
+    def test_anthropic_oat_registers_without_error(self, mock_reg):
+        """anthropic_oat provider registers successfully with LlmFactory."""
+        server_mod.register_providers([
+            {"name": "anthropic_oat", "class_path": "mem0_mcp_selfhosted.llm_anthropic.AnthropicOATLLM"},
+        ])
+        mock_reg.assert_called_once()
+        assert mock_reg.call_args[1]["name"] == "anthropic_oat"
+
     @patch("mem0.utils.factory.LlmFactory.register_provider")
     def test_unknown_provider_logs_warning(self, mock_reg):
         """Unknown provider name logs a warning and is skipped."""
