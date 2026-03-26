@@ -1,42 +1,102 @@
-# CLAUDE.md
+# Claude Code Context (.claude/ supplement)
 
-This file provides guidance to Claude Code when working with code in this repository.
+**This file supplements the root `/CLAUDE.md`.** It contains only rules and configuration unique to the `.claude/` directory context. For project overview, structure, commands, standards references, CI/CD, and all other shared context, see the root `CLAUDE.md`.
+
+## 🚫 DO NOT MODIFY THIS FILE OR `.claude/` STANDARDS
+
+**These are centralized template files that will be overwritten when standards are updated.**
+
+- ❌ **NEVER edit** `CLAUDE.md`, `.claude/*.md`, `docs/STANDARDS.md`, or `docs/standards/*.md`
+- ✅ **CREATE NEW FILES** for app-specific context:
+  - `docs/APP_STANDARDS.md` - App-specific architecture, requirements, context
+  - `.claude/{subject}.local.md` - Project-specific overrides (e.g., `architecture.local.md`, `python.local.md`)
+
+**App-Specific Addendums to Standardized Files:**
+
+If your app needs to add exceptions, clarifications, or context to standardized `.claude/` files (e.g., `react.md`, `python.md`, `testing.md`), **DO NOT edit those files**. Instead, create a `.local` variant:
+
+- `react.md` (standardized) → Create `react.local.md` for app-specific React patterns
+- `python.md` (standardized) → Create `python.local.md` for app-specific Python decisions
+- `testing.md` (standardized) → Create `testing.local.md` for app-specific test requirements
+- `security.md` (standardized) → Create `security.local.md` for app-specific security rules
+
+**Local Repository Overrides:**
+
+This repository may contain `.local.md` variant files that provide project-specific overrides or addendums:
+- `CLAUDE.local.md` - Project-specific additions or clarifications to this CLAUDE.md
+- `.claude/*.local.md` - Project-specific overrides to standardized `.claude/` rules
+
+**Always check for and read `.local.md` files** alongside standard files to ensure you have the complete context for this specific repository.
+
+---
 
 ## MCP Servers
 
-- **mem0**: Persistent memory across sessions. At the start of each session, `search_memories` for relevant context before asking the user to re-explain anything. Use `add_memory` whenever you discover project architecture, coding conventions, debugging insights, key decisions, or user preferences. Use `update_memory` when prior context changes. Save information like: "This project uses PostgreSQL with Prisma", "Tests run with pytest -v", "Auth uses JWT validated in middleware". When in doubt, save it — future sessions benefit from over-remembering.
+- **mem0**: Persistent memory across sessions. At the start of each session, `search_memories` for relevant context before asking the user to re-explain anything. Use `add_memory` whenever you discover project architecture, coding conventions, debugging insights, key decisions, or user preferences. Use `update_memory` when prior context changes. Save information like: "This project uses PostgreSQL with Prisma", "Tests run with pytest -v", "Auth uses JWT validated in middleware". When in doubt, save it, future sessions benefit from over-remembering.
 
-## Build & Test Commands
+---
+
+## Setup Script
+
+This repo includes `setup.sh` which configures the local Claude Code environment:
 
 ```bash
-pip install -e ".[dev]"              # Install with dev dependencies
-python3 -m pytest tests/unit/ -v     # Unit tests (mocked, no infra needed)
-python3 -m pytest tests/contract/ -v # Contract tests (validates mem0ai internals)
-python3 -m pytest tests/integration/ -v  # Integration tests (requires live Qdrant + Neo4j + Ollama)
-python3 -m pytest tests/ -v          # All tests
-python3 -m pytest tests/ -m "not integration" -v  # Skip integration
-python3 -m pytest tests/unit/test_auth.py::TestIsOatToken -v  # Single test class
-python3 -m pytest tests/unit/test_auth.py::TestIsOatToken::test_oat_token_detected -v  # Single test
+.claude/setup.sh              # Full setup (statusline + mem0 + settings)
+.claude/setup.sh statusline   # Statusline only
+.claude/setup.sh mem0         # mem0 + Qdrant only
+.claude/setup.sh settings     # Settings update only
 ```
 
-## Architecture
+At session start, verify the environment is configured. If `~/.claude/statusline-command.sh` or `~/.claude/mcp/mem0/mcp-server.py` does not exist, run `setup.sh` from this repo.
 
-Self-hosted MCP server using `mem0ai` as a library. 11 tools (9 memory + 2 graph), FastMCP orchestrator.
+### Status Line
 
-**Module roles:**
-- `server.py` — FastMCP orchestrator, registers all tools + `memory_assistant` prompt
-- `config.py` — Env vars → mem0ai `MemoryConfig` dict, handles all 5 graph LLM provider configs
-- `auth.py` — 3-tier token fallback: `MEM0_ANTHROPIC_TOKEN` → `~/.claude/.credentials.json` → `ANTHROPIC_API_KEY`
-- `llm_anthropic.py` — Custom Anthropic provider registered with mem0ai's `LlmFactory`; handles OAT headers, structured outputs (JSON schema via `output_config`), and tool-call parsing
-- `llm_router.py` — `SplitModelGraphLLM` routes by tool name: extraction tools → Gemini, contradiction tools → Claude
-- `helpers.py` — `_mem0_call()` error wrapper, `call_with_graph()` threading lock for per-call graph toggle, `safe_bulk_delete()` iterates+deletes individually (never calls `memory.delete_all()`), `patch_graph_sanitizer()` monkey-patches mem0ai's relationship sanitizer for Neo4j compliance
-- `graph_tools.py` — Direct Neo4j Cypher queries with lazy driver init
-- `__init__.py` — Suppresses mem0ai telemetry before any imports
+The setup script symlinks `statusline-command.sh` to `~/.claude/` and configures `settings.json`. The statusline displays model, effort, repo, branch, context usage, cost, and duration.
 
-**Critical implementation details:**
-- `memory.delete()` does NOT clean Neo4j nodes (mem0ai bug #3245) — `safe_bulk_delete()` explicitly calls `memory.graph.delete_all(filters)` after
-- `memory.enable_graph` is mutable instance state — `call_with_graph()` holds a `threading.Lock` for the full duration of each Memory call (2-20s)
-- Contract tests (`tests/contract/`) validate mem0ai internal API assumptions — if these fail after a mem0ai upgrade, the code needs updating
-- `Memory.update()` uses `data=` parameter, not `text=`
-- Structured output support requires claude-opus-4/sonnet-4/haiku-4 models; older models fall back to JSON extraction
-- mem0ai's `sanitize_relationship_for_cypher()` has gaps (no hyphen handling, no leading-digit check) — `patch_graph_sanitizer()` wraps it at startup to ensure all relationship types match `^[a-zA-Z_][a-zA-Z0-9_]*$`
+### mem0 (Local Persistent Memory)
+
+The setup script deploys a local Qdrant container for vector storage and configures a mem0 MCP server using Ollama for embeddings (`nomic-embed-text`) and LLM (`llama3.2:3b`). All memory operations are fully local — no external API calls.
+
+**Manage Qdrant:**
+```bash
+docker compose -f ~/.claude/mcp/mem0/docker-compose.yml up -d    # start
+docker compose -f ~/.claude/mcp/mem0/docker-compose.yml down      # stop
+```
+
+**Qdrant dashboard:** http://localhost:6333/dashboard
+
+---
+
+## ⚠️ ADDITIONAL CRITICAL RULES
+
+The following rules **add to** the critical rules in root `CLAUDE.md`. See root for base git, code quality, and standards references.
+
+**Git Branch Rules:**
+- **NEVER edit code directly on `main`** — always work on a feature branch
+- **CHECK current branch before any code change**: if on `main`, create and switch to a feature branch first (`git checkout -b feature/<name>`)
+
+**Code Quality (additions):**
+- **NEVER ignore pre-existing issues** — if you encounter existing bugs, failing tests, lint errors, TODOs marked as broken, or code that violates standards while working on an unrelated task, **fix them or explicitly flag them to the user**. Do not silently work around them or pretend they are not there. Leaving known issues in place is not acceptable
+
+**Tool Usage:**
+- **NEVER use `sed`, `awk`, `cat`, `head`, `tail`, `echo`, `grep`, `find`, or `rg` via Bash** when a dedicated tool exists — use the dedicated tools instead:
+  - Read files → **Read** tool (not `cat`, `head`, `tail`)
+  - Edit files → **Edit** tool (not `sed`, `awk`)
+  - Write/create files → **Write** tool (not `echo >`, `cat <<EOF`)
+  - Search file contents → **Grep** tool (not `grep`, `rg`)
+  - Find files by name → **Glob** tool (not `find`, `ls`)
+- Only fall back to Bash for these commands when the dedicated tool genuinely cannot accomplish the task (e.g., piped shell pipelines, complex transformations)
+- This reduces unnecessary approval prompts and keeps operations auditable
+
+---
+
+## Version Increment Rule
+
+**Only increment Major/Minor/Patch when the current version already has a published git tag and/or GitHub release.** If no tag/release exists for the current version yet, update only the build epoch.
+
+**Rationale:** Incrementing a version before the current one ships creates gaps in the published sequence (e.g., `v1.2.1` → `v1.2.4` with no `v1.2.2` or `v1.2.3` ever released). Consumers, changelogs, and package managers see these gaps as missing releases, which is confusing and looks like a mistake.
+
+**Decision flow:**
+1. Check if the current `.version` is already tagged: `git tag --list "$(cat .version | cut -d. -f1-3)*"`
+2. If **no tag exists** → only update the build epoch: `./scripts/version/update-version.sh`
+3. If **a tag already exists** → safe to increment: `./scripts/version/update-version.sh patch|minor|major`
