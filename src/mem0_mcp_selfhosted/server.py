@@ -209,8 +209,23 @@ def _register_tools(mcp: FastMCP) -> None:
             kwargs["agent_id"] = agent_id
         if run_id:
             kwargs["run_id"] = run_id
+
+        # Auto-inject author/team provenance — useful for shared/team memory banks.
+        # MEM0_AUTHOR_ID: who added the memory (e.g. "justinb"). Falls back to MEM0_USER_ID.
+        # MEM0_TEAM_ID: team or group scope (e.g. "infosec"). Optional.
+        # Result stored in Qdrant metadata: {"user": "justinb", "team": "infosec", ...}
+        base_meta: dict[str, Any] = {}
+        author = env("MEM0_AUTHOR_ID", "") or env("MEM0_USER_ID", "")
+        if author:
+            base_meta["user"] = author
+        team = env("MEM0_TEAM_ID", "")
+        if team:
+            base_meta["team"] = team
         if metadata:
-            kwargs["metadata"] = metadata
+            base_meta.update(metadata)  # caller-supplied metadata wins on collision
+        if base_meta:
+            kwargs["metadata"] = base_meta
+
         if infer is not None:
             kwargs["infer"] = infer
 
