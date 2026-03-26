@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+import subprocess
 import threading
 import time
 from typing import Annotated, Any
@@ -43,6 +44,75 @@ _enable_graph_default = False
 _memory_init_lock = threading.Lock()
 _last_init_failure: float = 0.0
 _INIT_RETRY_COOLDOWN = 30.0  # seconds before retrying after a failed init
+
+# --- Git context (detected once at startup, cached for session lifetime) ---
+_git_context: dict[str, str] | None = None
+_git_context_lock = threading.Lock()
+
+
+def _get_git_context() -> dict[str, str]:
+    """Detect git repo URL and branch from the working directory.
+
+    Results are cached after the first call — git subprocess runs once per
+    MCP server session, not on every add_memory call.
+
+    MEM0_REPO_URL and MEM0_REPO_BRANCH env vars override auto-detection
+    (useful for CI, monorepos, or non-git environments).
+
+    Returns a dict with any of: {"repo": "...", "branch": "..."}.
+    Returns empty dict if not in a git repo and no overrides set.
+    """
+    global _git_context
+    if _git_context is not None:
+        return _git_context
+
+    with _git_context_lock:
+        if _git_context is not None:
+            return _git_context
+
+        context: dict[str, str] = {}
+
+        # Repo URL — env override takes precedence
+        repo_url = env("MEM0_REPO_URL", "")
+        if not repo_url:
+            try:
+                repo_url = subprocess.check_output(
+                    ["git", "remote", "get-url", "origin"],
+                    stderr=subprocess.DEVNULL,
+                    timeout=3,
+                ).decode().strip()
+                # Normalize SSH remotes to HTTPS for readability
+                # e.g. git@github.com:org/repo.git → https://github.com/org/repo
+                if repo_url.startswith("git@"):
+                    repo_url = repo_url.replace(":", "/", 1).replace("git@", "https://")
+                if repo_url.endswith(".git"):
+                    repo_url = repo_url[:-4]
+            except Exception:
+                repo_url = ""
+        if repo_url:
+            context["repo"] = repo_url
+
+        # Branch — env override takes precedence
+        branch = env("MEM0_REPO_BRANCH", "")
+        if not branch:
+            try:
+                branch = subprocess.check_output(
+                    ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                    stderr=subprocess.DEVNULL,
+                    timeout=3,
+                ).decode().strip()
+                # Suppress detached HEAD state
+                if branch == "HEAD":
+                    branch = ""
+            except Exception:
+                branch = ""
+        if branch:
+            context["branch"] = branch
+
+        _git_context = context
+        if context:
+            logger.info("Git context detected: %s", context)
+        return _git_context
 
 
 def register_providers(providers_info: list[ProviderInfo]) -> None:
@@ -210,10 +280,11 @@ def _register_tools(mcp: FastMCP) -> None:
         if run_id:
             kwargs["run_id"] = run_id
 
-        # Auto-inject author/team provenance — useful for shared/team memory banks.
+        # Auto-inject provenance metadata — useful for shared/team memory banks.
         # MEM0_AUTHOR_ID: who added the memory (e.g. "justinb"). Falls back to MEM0_USER_ID.
         # MEM0_TEAM_ID: team or group scope (e.g. "infosec"). Optional.
-        # Result stored in Qdrant metadata: {"user": "justinb", "team": "infosec", ...}
+        # Git repo URL + branch: auto-detected from CWD, overridable via env vars.
+        # Result: {"user": "justinb", "team": "infosec", "repo": "https://...", "branch": "main"}
         base_meta: dict[str, Any] = {}
         author = env("MEM0_AUTHOR_ID", "") or env("MEM0_USER_ID", "")
         if author:
@@ -221,6 +292,7 @@ def _register_tools(mcp: FastMCP) -> None:
         team = env("MEM0_TEAM_ID", "")
         if team:
             base_meta["team"] = team
+        base_meta.update(_get_git_context())  # adds "repo" and/or "branch" if detected
         if metadata:
             base_meta.update(metadata)  # caller-supplied metadata wins on collision
         if base_meta:

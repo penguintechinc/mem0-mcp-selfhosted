@@ -67,22 +67,41 @@ This fork changes the dependency to `mem0ai[llms]` (vector store only) and remov
 
 **Embedding model:** This fork is configured with `nomic-embed-text` (Nomic AI, US-based, 768 dims) instead of the upstream default `bge-m3` (BAAI, China). Both work — change `MEM0_EMBED_MODEL` and `MEM0_EMBED_DIMS` to swap.
 
-### Author and team provenance tagging
+### Author, team, and git context provenance tagging
 
-Every `add_memory` call automatically stamps metadata with the author and optional team, making it easy to track who added what in a shared Qdrant instance.
+Every `add_memory` call automatically stamps metadata with author, team, and git repository context, making it easy to track who added what and from which project.
 
-Set these env vars in your MCP config:
+**Auto-detected (no config needed):**
+- `repo` — git remote URL of the current working directory (SSH remotes normalized to HTTPS)
+- `branch` — current git branch name
+
+**Set these env vars in your MCP config:**
 
 | Variable | Purpose | Example |
 |----------|---------|---------|
 | `MEM0_AUTHOR_ID` | Who added the memory. Falls back to `MEM0_USER_ID` if unset. | `justinb` |
 | `MEM0_TEAM_ID` | Optional team/group tag. | `infosec` |
+| `MEM0_REPO_URL` | Override auto-detected repo URL (useful in CI or monorepos). | `https://github.com/org/repo` |
+| `MEM0_REPO_BRANCH` | Override auto-detected branch. | `main` |
 
-Each stored memory will include `{"user": "justinb", "team": "infosec"}` in its Qdrant metadata. You can filter search results by author using the `filters` parameter on `search_memories`:
+Each stored memory includes full provenance in Qdrant metadata:
+```json
+{
+  "user": "justinb",
+  "team": "infosec",
+  "repo": "https://github.com/justinb-dfw/mem0-mcp-selfhosted",
+  "branch": "main"
+}
+```
 
+You can filter `search_memories` by any metadata field:
 ```json
 {"user": {"eq": "justinb"}}
+{"repo": {"eq": "https://github.com/org/my-project"}}
+{"branch": {"eq": "feature/auth-rewrite"}}
 ```
+
+Git context is detected once at MCP server startup (not per call) and cached for the session. In non-git directories, `repo` and `branch` are simply omitted from metadata.
 
 For team setups, all members share a common `MEM0_USER_ID` scope for retrieval but each set their own `MEM0_AUTHOR_ID` — so memories are pooled but attributable.
 
