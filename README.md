@@ -2,9 +2,60 @@
 
 > **Fork of [elvismdev/mem0-mcp-selfhosted](https://github.com/elvismdev/mem0-mcp-selfhosted)** — many thanks to [@elvismdev](https://github.com/elvismdev) for the original implementation.
 
-Self-hosted [mem0](https://github.com/mem0ai/mem0) MCP server for Claude Code. Run a complete memory server against self-hosted Qdrant + Ollama, with your choice of Anthropic (Claude) or Ollama as the main LLM.
+Self-hosted [mem0](https://github.com/mem0ai/mem0) MCP server for Claude Code. Supports two vector store backends:
+
+- **Qdrant** (default) — lightweight, purpose-built vector DB. No system deps required.
+- **pgvector** — PostgreSQL with pgvector extension + Neo4j graph. Heavier but includes entity relationship graph support.
 
 Uses the `mem0ai` package directly as a library, supports both Claude's OAT token and fully local Ollama setups, and exposes 11 MCP tools for full memory management.
+
+## Quick Install
+
+```bash
+# Qdrant (default — lightweight, recommended for personal/solo use)
+make install
+
+# pgvector + Neo4j (full graph support — recommended for teams)
+make install-pgvector
+```
+
+## Deployment Scenarios
+
+### Scenario 1: Personal use (Qdrant, local)
+Run `make install`. Everything runs locally on your machine. Qdrant in Docker, Ollama native.
+
+### Scenario 2: Team shared memory bank (pgvector + Neo4j, local Docker)
+Run `make install-pgvector`. Starts pgvector and Neo4j containers locally. All team members
+point their MCP servers at the same `MEM0_USER_ID` scope. Each member sets their own
+`MEM0_AUTHOR_ID` to tag memories with their identity.
+
+### Scenario 3: Team shared memory bank (existing shared infrastructure)
+Skip the Docker setup entirely. Set connection env vars to point at your team's existing
+pgvector and/or Neo4j instances:
+
+```bash
+claude mcp add --scope user --transport stdio mem0 \
+  --env MEM0_USER_ID=team-infosec \
+  --env MEM0_AUTHOR_ID=yourname \
+  --env MEM0_TEAM_ID=infosec \
+  --env MEM0_VECTOR_STORE=pgvector \
+  --env MEM0_PG_HOST=your-postgres-host \
+  --env MEM0_PG_PORT=5432 \
+  --env MEM0_PG_USER=mem0 \
+  --env MEM0_PG_PASSWORD=your-password \
+  --env MEM0_PG_DB=mem0 \
+  --env MEM0_ENABLE_GRAPH=true \
+  --env MEM0_NEO4J_URL=bolt://your-neo4j-host:7687 \
+  --env MEM0_NEO4J_USER=neo4j \
+  --env MEM0_NEO4J_PASSWORD=your-password \
+  --env MEM0_OLLAMA_URL=http://your-ollama-host:11434 \
+  --env MEM0_PROVIDER=anthropic \
+  --env MEM0_TELEMETRY=false \
+  -- uvx --from git+https://github.com/justinb-dfw/mem0-mcp-selfhosted.git mem0-mcp-selfhosted
+```
+
+> **Ollama URL:** The MCP server defaults to `http://localhost:11434`. If your Ollama instance
+> is remote, in Docker, or on a non-standard port, always set `MEM0_OLLAMA_URL` explicitly.
 
 ## Changes in this fork
 
