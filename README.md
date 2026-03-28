@@ -350,7 +350,7 @@ All configuration is via environment variables. Create a `.env` file or set them
 | `MEM0_EMBED_PROVIDER` | `ollama` | Embedding provider (`ollama` or `openai`) |
 | `MEM0_EMBED_MODEL` | `bge-m3` | Embedding model name |
 | `MEM0_EMBED_URL` | _(cascades)_ | Ollama URL for embeddings. Cascades: `MEM0_EMBED_URL` → `MEM0_OLLAMA_URL` → `http://localhost:11434` |
-| `MEM0_EMBED_DIMS` | `1024` | Embedding vector dimensions |
+| `MEM0_EMBED_DIMS` | `1024` | Embedding vector dimensions. **Must match the model's actual output size** — `bge-m3` → `1024`, `nomic-embed-text` → `768`. Mismatch causes "Vector dimension error" on every insert. See [Troubleshooting](#troubleshooting). |
 
 ### Vector Store (Qdrant)
 
@@ -498,6 +498,50 @@ python3 -m pytest tests/ -v
 - **`tests/integration/`** -- Live infrastructure tests (memory lifecycle, graph ops, bulk operations, hooks) against real Qdrant + Neo4j + Ollama. Marked with `@pytest.mark.integration`.
 
 Contract tests catch breaking changes in `mem0ai` upgrades before they reach production.
+
+## Troubleshooting
+
+### "Vector dimension error: expected dim: X, got Y"
+
+**Cause:** The Qdrant collection was created with a different vector size than the current embedding model produces. Qdrant fixes the vector dimension at collection creation time and rejects any insert that doesn't match.
+
+This happens most often when:
+- You changed `MEM0_EMBED_MODEL` (e.g. `bge-m3` → `nomic-embed-text`) without also updating `MEM0_EMBED_DIMS`
+- The collection was created in a previous session with different settings (the server uses `MEM0_EMBED_DIMS` to create the collection only when it doesn't already exist — a stale collection is never auto-migrated)
+- Multiple Claude Code projects share the same Qdrant instance, each launching the MCP server with different env vars
+
+**Common model dims:**
+
+| Model | Dims |
+|-------|------|
+| `bge-m3` (upstream default) | 1024 |
+| `nomic-embed-text` (this fork's default) | 768 |
+| `mxbai-embed-large` | 1024 |
+| `text-embedding-3-small` | 1536 |
+
+**Fix:**
+
+1. Delete the stale collection:
+   ```bash
+   curl -X DELETE http://localhost:6333/collections/mem0_mcp_selfhosted
+   ```
+   Replace `mem0_mcp_selfhosted` with your `MEM0_COLLECTION` value if you've customized it.
+
+2. Ensure `MEM0_EMBED_DIMS` matches your model (e.g. `768` for `nomic-embed-text`).
+
+3. The server will recreate the collection with the correct dims on the next `add_memory` call.
+
+> **If you can't afford to lose existing memories:** export them first via `get_memories`, delete the collection, let the server recreate it, then re-import. Or create the new collection under a different `MEM0_COLLECTION` name and migrate incrementally.
+
+### `add_memory` returns `{"results": []}` with no error
+
+The LLM extracted no memorable facts from the text. This can happen with small models (e.g. `llama3.2:1b`) given long or technical input. Use `infer=False` to bypass LLM extraction and store the raw text directly:
+
+```
+add_memory(text="...", infer=False)
+```
+
+The memory is stored as-is without fact extraction. Search still works normally (the full text is embedded).
 
 ## Telemetry
 
